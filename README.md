@@ -1,2 +1,2 @@
 # WebsocketServerClient
-springboot ʵ�ֵ�websocket client + server
+springboot 实现的websocket client + server
