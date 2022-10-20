@@ -1,6 +1,7 @@
 package cn.ai4wms.client.factory;
 
-import lombok.Data;
+import cn.ai4wms.client.utils.MacUtil;
+import cn.ai4wms.client.utils.ShellUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.java_websocket.WebSocket;
 import org.java_websocket.client.WebSocketClient;
@@ -11,14 +12,12 @@ import org.springframework.stereotype.Component;
 
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.util.UUID;
+import java.util.regex.Pattern;
 
 @Component
 @Slf4j
-@Data
 public class WebSocketClientFactory {
-
-    public static final String outCallWebSockertUrl = "ws://localhost:9000/server";
+    public static final String outCallWebSockertUrl = "ws://192.168.18.8:9000/server";
 
     private WebSocketClient outCallWebSocketClientHolder;
 
@@ -37,6 +36,14 @@ public class WebSocketClientFactory {
 
             @Override
             public void onMessage(String msg) {
+                if (isValidIPAddress(msg)) {
+                    String rtspStream = String.format("rtsp://admin:a12345678@%s:554/cam/realmonitor?channel=1&subtype=0", msg);
+                    String suffix = msg.replace(".", "-");
+                    String rtmpStream = String.format("rtmp://192.168.18.242:1935/live/%s", suffix);
+                    String cmd = String.format("nohup ffmpeg -loglevel quiet -i '%s' -vcodec copy -acodec copy -f flv %s> /dev/null 2>&1 &", rtspStream, rtmpStream);
+                    log.info(cmd);
+                    ShellUtils.runShell(cmd);
+                }
                 log.info("接收信息为：{}", msg);
             }
 
@@ -64,19 +71,20 @@ public class WebSocketClientFactory {
     public synchronized WebSocketClient retryOutCallWebSocketClient() {
         try {
             // 关闭旧的websocket连接, 避免占用资源
-            WebSocketClient oldOutCallWebSocketClientHolder = this.getOutCallWebSocketClientHolder();
+            WebSocketClient oldOutCallWebSocketClientHolder = getOutCallWebSocketClientHolder();
             if (null != oldOutCallWebSocketClientHolder) {
                 log.info("关闭旧的websocket连接");
                 oldOutCallWebSocketClientHolder.close();
             }
 
             log.info("打开新的websocket连接，并进行认证");
-            WebSocketClient webSocketClient = this.createNewWebSocketClient();
-            String sendOpenJsonStr = "{\"event\":\"connect\",\"sid\":\"1ae4e3167b3b49c7bfc6b79awww691562914214595\",\"token\":\"df59eba89\"}";
-            this.sendMsg(webSocketClient, sendOpenJsonStr);
+            WebSocketClient webSocketClient = createNewWebSocketClient();
+            String mac = MacUtil.getCurrentIpLocalMac();
+            String sendOpenJsonStr = "{\"event\":\"connect\",\"mac\":\"" + mac + "\",\"token\":\"df59eba89\"}";
+            sendMsg(webSocketClient, sendOpenJsonStr);
 
             // 每次创建新的就放进去
-            this.setOutCallWebSocketClientHolder(webSocketClient);
+            setOutCallWebSocketClientHolder(webSocketClient);
             return webSocketClient;
         } catch (URISyntaxException e) {
             e.printStackTrace();
@@ -113,7 +121,7 @@ public class WebSocketClientFactory {
     public void sendHeartBeat() {
         log.info("定时发送websocket心跳");
         try {
-            WebSocketClient outCallWebSocketClientHolder = this.getOutCallWebSocketClientHolder();
+            WebSocketClient outCallWebSocketClientHolder = getOutCallWebSocketClientHolder();
 
             if (null == outCallWebSocketClientHolder) {
                 log.info("当前连接还未建立，暂不发送心跳消息");
@@ -121,9 +129,9 @@ public class WebSocketClientFactory {
             }
 
             // 心跳的请求串，根据服务端来定
-            String uuid = UUID.randomUUID().toString();
-            String heartBeatMsg = "{\"event\":\"heartbeat\",\"sid\":\"" + uuid + "\"}";
-            this.sendMsg(outCallWebSocketClientHolder, heartBeatMsg);
+            String mac = MacUtil.getCurrentIpLocalMac();
+            String heartBeatMsg = "{\"event\":\"heartbeat\",\"mac\":\"" + mac + "\"}";
+            sendMsg(outCallWebSocketClientHolder, heartBeatMsg);
         } catch (Exception e) {
             e.printStackTrace();
             log.error("发送心跳异常");
@@ -131,4 +139,18 @@ public class WebSocketClientFactory {
         }
     }
 
+    private boolean isValidIPAddress(String ipAddress) {
+        if ((ipAddress != null) && (!ipAddress.isEmpty())) {
+            return Pattern.matches("^([1-9]|[1-9]\\d|1\\d{2}|2[0-4]\\d|25[0-5])(\\.(\\d|[1-9]\\d|1\\d{2}|2[0-4]\\d|25[0-5])){3}$", ipAddress);
+        }
+        return false;
+    }
+
+    private WebSocketClient getOutCallWebSocketClientHolder() {
+        return outCallWebSocketClientHolder;
+    }
+
+    private void setOutCallWebSocketClientHolder(WebSocketClient webSocketClient) {
+        outCallWebSocketClientHolder = webSocketClient;
+    }
 }
